@@ -1,24 +1,31 @@
 #include "stm32f10x.h"
 #include "MatrixKeypad.h"
-#include "stdio.h"
+#include "stdio.h" // для printf().
+#include "types.h"
+
+#define ARRLEN(a) sizeof(a)/sizeof(*a) // Количество элементов в массиве. 
 
 static void InitHardware(void);
-static void PrintKey(U32_t keyCode, KeyEvent_t ev);
+static void PrintKey(U16 keyCode, KeyEvent_t ev);
 
-Pin_t keypadIn[] = 
+// Входы.
+PinIn_t keypadIn[] = 
 {
-	{(PortPtr_t)GPIOB, 12},
-	{(PortPtr_t)GPIOB, 4},
-	{(PortPtr_t)GPIOB, 5},
-	{(PortPtr_t)GPIOB, 6},
+	{&GPIOB->IDR, /*адрес порта*/ 12 /*номер пина порта*/},
+	{&GPIOB->IDR, 13},
+	{&GPIOB->IDR, 5},
+	{&GPIOB->IDR, 6},
 };
 
-Pin_t keypadOut[] = 
+// Выходы.
+PinOut_t keypadOut[] = 
 {
-	{(PortPtr_t)GPIOB, 7},
-	{(PortPtr_t)GPIOB, 8},
-	{(PortPtr_t)GPIOB, 9},
+	{&GPIOB->ODR,/*адрес порта*/ 7 /*номер пина порта*/},
+	{&GPIOB->ODR, 8},
+	{&GPIOB->ODR, 9},
 };
+// Размер массива  = количество клавиш клавиатуры = кол-во строк * кол-ко столбцов.
+U8 keyScanBuff[ARRLEN(keypadOut) * ARRLEN(keypadIn)];
 
 MatrixKeypad_t keypad =
 {
@@ -30,7 +37,9 @@ MatrixKeypad_t keypad =
 	ARRLEN(keypadIn),
 	HIGH_LVL,
 	
-	2,
+	keyScanBuff,
+	ARRLEN(keyScanBuff),
+	4, // количество циклов сканирования.
 	
 	PrintKey
 };
@@ -38,26 +47,29 @@ MatrixKeypad_t keypad =
 int main()
 {
 	InitHardware();
-	//MatrixKeypad_Init(&keypad);
+	MatrixKeypad_Init(&keypad);
+	
 	while(1)
 	{
-		__NOP();
+		MatrixKeypad_ExecKeyHandlers(&keypad);
 	}
 }
 
 void InitHardware()
 {
+	// Используется тактовая частота 72 МГц от рехонатора 8 МГц.
+	// Настройка частоты происходит в SystemInit().
 	SET_BIT(RCC->APB2ENR, RCC_APB2ENR_IOPBEN);
 	// GPIOB4, 5, 6, 12 - input with pull-down;
 	// GPIOB7, 8, 9 - Outputs mode, max speed 2 MHz.
 	GPIOB->ODR = 0;
-	GPIOB->CRL |= GPIO_CRL_MODE7_1|
-								GPIO_CRL_CNF4_1 |
-								GPIO_CRL_CNF5_1 |
+	GPIOB->CRL = GPIO_CRL_MODE7_1  |
+								GPIO_CRL_CNF5_1  |
 								GPIO_CRL_CNF6_1; 	
-	GPIOB->CRH |= GPIO_CRH_MODE8_1|
-								GPIO_CRH_MODE9_1|
-								GPIO_CRH_CNF12_1;
+	GPIOB->CRH = GPIO_CRH_MODE8_1  |
+								GPIO_CRH_MODE9_1 |
+								GPIO_CRH_CNF12_1 |
+								GPIO_CRH_CNF13_1;
 	
 	#define TIM1_CLK 2000
 	SET_BIT(RCC->APB2ENR, RCC_APB2ENR_TIM1EN);
@@ -75,26 +87,18 @@ void InitHardware()
 
 void TIM1_UP_IRQHandler(void)
 {
-	static U32_t cnt = 0;
   if(TIM1->SR & TIM_SR_UIF)
 	{
 		TIM1->SR = 0;
-		//MatrixKeypad_Scan(&keypad);
-		
-		if(cnt == 2000)
-		{
-			const char * str = "aaa";
-			printf("%sHello world %d\n", str, 50);
-			cnt = 0;
-		} 
-		cnt++;
+		MatrixKeypad_ScanProc(&keypad);
 	}
 }
 
-void PrintKey(U32_t keyCode, KeyEvent_t ev)
+void PrintKey(U16 keyCode, KeyEvent_t ev)
 {
 	if(ev == KEY_DOWN)
-		printf("Key #%d pressed. ", keyCode);
+		printf("Key #%d pressed.\n", keyCode);
 	else
-		printf("Key #%d released. ", keyCode);
+		printf("Key #%d released.\n", keyCode);
+	return;
 }
